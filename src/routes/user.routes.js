@@ -9,7 +9,7 @@ import {
   UpdatePrfileDetail,
   UpdateUserAvatar,
   updateUserCoverImage,
-  getWatchHoistory,
+  getWatchHistory,
   GetChannalDetail,
 } from "../controllers/User.controllers.js";
 import { upload } from "../middlewares/multer.middleware.js";
@@ -38,7 +38,7 @@ router.route("/PasswordChange").post(upload.none(), verifuJWT, PasswordChange);
 
 router
   .route("/UpdatePrfileDetail")
-  .post(upload.none(), verifuJWT, UpdatePrfileDetail);
+  .put(upload.none(), verifuJWT, UpdatePrfileDetail);
 
 router
   .route("/UpdateUserAvatar")
@@ -55,6 +55,6 @@ router
     updateUserCoverImage
   );
 router.route("/c/:username").get(verifuJWT, GetChannalDetail);
-router.route("WatchHoistory").get(verifuJWT, getWatchHoistory);
+router.route("/WatchHoistory").get(verifuJWT, getWatchHistory);
 
 export default router;

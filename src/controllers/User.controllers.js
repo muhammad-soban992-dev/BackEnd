@@ -281,9 +281,7 @@ const CurrentUserProfile = asyncHandler(async (req, res) => {
 });
 const UpdatePrfileDetail = asyncHandler(async (req, res) => {
   const { email, name, username, fullname } = req.body;
-  if (!email || !name || !username || !fullname) {
-    throw new ApiError(401, "All filde is Required");
-  }
+
   const user = await User.findByIdAndUpdate(
     req.user?._id,
     { $set: { username, email, name, fullname } },
@@ -423,58 +421,130 @@ const GetChannalDetail = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, channal[0], "User channel featch successfully"));
 });
-const getWatchHoistory = asyncHandler(async (req, res) => {
-  const user = await User.aggregate([
+
+const getWatchHistory = asyncHandler(async (req, res) => {
+  // ────────────────────────────────────────────────
+  // 1. Authentication check (already done by middleware, but double-check)
+  // ────────────────────────────────────────────────
+  if (!req.user?._id) {
+    throw new ApiError(401, "Unauthorized - user identity missing");
+  }
+
+  const userId = req.user._id;
+
+  // ────────────────────────────────────────────────
+  // 2. Validate MongoDB ObjectId format
+  // ────────────────────────────────────────────────
+  if (!mongoose.isValidObjectId(userId)) {
+    throw new ApiError(400, "Invalid user ID format");
+  }
+
+  // ────────────────────────────────────────────────
+  // 3. Aggregation pipeline (optimized & safe)
+  // ────────────────────────────────────────────────
+  const userWithHistory = await User.aggregate([
+    // Step 1: Find the exact user
     {
       $match: {
-        _id: new mongoose.Types.ObjectId(req.user._id),
+        _id: new mongoose.Types.ObjectId(userId),
       },
     },
+
+    // Step 2: Lookup videos from watchHistory array
     {
       $lookup: {
-        from: "Video", // mongodb colloection name
+        from: "videos", // ← important: collection name is lowercase + plural in most cases
         localField: "watchHistory",
         foreignField: "_id",
         as: "watchHistory",
-      },
-      pipeline: [
-        {
-          $lookup: {
-            from: "User",
-            localField: "owner",
-            foreignField: "_id",
-            as: "owner",
-            pipeline: [
-              {
-                $project: {
-                  fullname: 1,
-                  username: 1,
-                  avatar: 1,
-                },
-              },
-            ],
-          },
-        },
-        {
-          $addFields: {
-            owner: {
-              $first: "$owner",
+        pipeline: [
+          // Only get necessary fields from Video
+          {
+            $project: {
+              title: 1,
+              thumbnail: 1,
+              duration: 1,
+              views: 1,
+              createdAt: 1,
+              isPublished: 1,
+              owner: 1, // we'll populate this next
             },
           },
-        },
-      ],
+
+          // Step 3: Populate video owner (channel info)
+          {
+            $lookup: {
+              from: "users",
+              localField: "owner",
+              foreignField: "_id",
+              as: "owner",
+              pipeline: [
+                {
+                  $project: {
+                    fullname: 1,
+                    username: 1,
+                    avatar: 1,
+                    // Optional: coverImage: 1, subscribersCount? etc.
+                  },
+                },
+              ],
+            },
+          },
+
+          // Flatten owner array → single object
+          {
+            $addFields: {
+              owner: { $first: "$owner" },
+            },
+          },
+
+          // Optional: Sort by most recent watch (if you store watchedAt in watchHistory)
+          // {
+          //   $sort: { "watchedAt": -1 } // requires schema change
+          // },
+        ],
+      },
+    },
+
+    // Step 4: Project only what we want to return
+    {
+      $project: {
+        watchHistory: 1,
+        // We don't want to leak: password, refreshToken, etc.
+      },
     },
   ]);
+
+  // ────────────────────────────────────────────────
+  // 4. Handle user not found (very rare after auth middleware)
+  // ────────────────────────────────────────────────
+  if (!userWithHistory?.length) {
+    throw new ApiError(404, "User not found");
+  }
+
+  const watchHistory = userWithHistory[0].watchHistory || [];
+
+  // ────────────────────────────────────────────────
+  // 5. Optional: Add metadata / pagination info in future
+  // ────────────────────────────────────────────────
+  const responseData = {
+    items: watchHistory,
+    total: watchHistory.length,
+    // page: 1,
+    // limit: watchHistory.length,
+    // hasMore: false,
+  };
+
+  // ────────────────────────────────────────────────
+  // 6. Send response
+  // ────────────────────────────────────────────────
   return res
     .status(200)
     .json(
-      new ApiResponse(
-        200,
-        user[0].WatchHoistory,
-        "watch history fetched successfully"
-      )
+      new ApiResponse(200, responseData, "Watch history retrieved successfully")
     );
 });
+
 export {
   UpdatePrfileDetail,
   CurrentUserProfile,
@@ -486,5 +556,5 @@ export {
   UpdateUserAvatar,
   updateUserCoverImage,
   GetChannalDetail,
-  getWatchHoistory,
+  getWatchHistory,
 };

@@ -1,23 +1,18 @@
 import { Video } from "../models/videos.model.js";
+import mongoose from "mongoose";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { uploadOnCloudinary } from "../cloudinary.js";
+import fs from "fs";
 
 const publishAVideo = asyncHandler(async (req, res) => {
-  // ────────────────────────────────────────────────
-  // 1. Get data safely (body + files)
-  // ────────────────────────────────────────────────
   const { title, description } = req.body;
 
-  // Better trimming + existence check
   if (!title?.trim() || !description?.trim()) {
     throw new ApiError(400, "Title and description are required");
   }
 
-  // ────────────────────────────────────────────────
-  // 2. File validation - very important!
-  // ────────────────────────────────────────────────
   if (!req.files || !req.files.videoFile || !req.files.thumbnail) {
     throw new ApiError(400, "Both video file and thumbnail are required");
   }
@@ -32,33 +27,27 @@ const publishAVideo = asyncHandler(async (req, res) => {
     );
   }
 
-  // ────────────────────────────────────────────────
-  // 3. Upload both files → Cloudinary
-  //    Do NOT trust client — always verify upload result
-  // ────────────────────────────────────────────────
   const videoUploadResult = await uploadOnCloudinary(videoFileLocalPath);
   const thumbnailUploadResult = await uploadOnCloudinary(thumbnailLocalPath);
-  console.log(videoUploadResult.url);
   if (!videoUploadResult?.url || !thumbnailUploadResult?.url) {
     throw new ApiError(500, "Failed to upload file(s) to Cloudinary");
   }
 
-  // Optional: you can also check resource_type === "video" / "image"
   if (videoUploadResult.resource_type !== "video") {
     throw new ApiError(400, "Uploaded file is not a valid video");
   }
 
-  // ────────────────────────────────────────────────
-  // 4. Create document – use reliable duration if available
-  // ────────────────────────────────────────────────
+  if (fs.existsSync(videoFileLocalPath)) fs.unlinkSync(videoFileLocalPath);
+  if (thumbnailUploadResult && fs.existsSync(thumbnailUploadResult)) {
+    fs.unlinkSync(thumbnailUploadResult);
+  }
+
   const video = await Video.create({
     videoFile: videoUploadResult,
-    // secure variant: prefer secure_url when possible
-    // videoFile: videoUploadResult.secure_url,
     thumbnail: thumbnailUploadResult,
     title: title.trim(),
     description: description.trim(),
-    duration: Math.round(videoUploadResult.duration || 0), // seconds
+    duration: Math.round(videoUploadResult.duration || 0),
     owner: req.user._id,
   });
 
@@ -69,8 +58,8 @@ const publishAVideo = asyncHandler(async (req, res) => {
 
 // 2. Get video by ID
 const getVideoById = asyncHandler(async (req, res) => {
-  const { videoId } = req.params;
-
+  const { videoId } = req.user._id;
+  console.log(req.user);
   if (!mongoose.isValidObjectId(videoId)) {
     throw new ApiError(400, "Invalid video ID");
   }
